@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""
+Script to automatically generate INDEX.md with all applications
+"""
+
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+import glob
+
+def extract_frontmatter(content):
+    """Extract status from content"""
+    # Look for status pattern
+    status_patterns = [
+        r'\*\*Status\*\*:\s*([^\n]+)',
+        r'Status:\s*([^\n]+)',
+        r'- Status:\s*([^\n]+)'
+    ]
+    
+    for pattern in status_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            status = match.group(1).strip()
+            # Clean up emojis and extra spaces
+            status = re.sub(r'[🟢🟡🔵⚫]', '', status).strip()
+            return status
+    
+    return "Unknown"
+
+def extract_type(content):
+    """Extract application type from content"""
+    type_patterns = [
+        r'\*\*Type\*\*:\s*([^\n]+)',
+        r'Type:\s*([^\n]+)',
+        r'- Type:\s*([^\n]+)'
+    ]
+    
+    for pattern in type_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    
+    return "Unknown"
+
+def extract_name(file_path, content):
+    """Extract application name from content or filename"""
+    # Try to get name from first heading
+    heading_patterns = [
+        r'^#\s+\[(.*?)\]',  # [# Name]
+        r'^#\s+(.*?)$',      # # Name
+        r'^#\s+(.*?)\n'      # # Name with newline
+    ]
+    
+    for pattern in heading_patterns:
+        match = re.search(pattern, content, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+    
+    # Fallback to filename
+    return Path(file_path).stem.replace('-', ' ').title()
+
+def get_status_emoji(status):
+    """Convert status to emoji"""
+    status_lower = status.lower()
+    if 'active' in status_lower:
+        return '🟢'
+    elif 'development' in status_lower or 'dev' in status_lower:
+        return '🟡'
+    elif 'hold' in status_lower:
+        return '🔵'
+    elif 'archived' in status_lower:
+        return '⚫'
+    else:
+        return '⚪'
+
+def get_application_info(file_path):
+    """Extract key information from application markdown file"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        name = extract_name(file_path, content)
+        status = extract_frontmatter(content)
+        app_type = extract_type(content)
+        
+        # Extract last updated from file or content
+        last_updated_match = re.search(r'\*\*Last Updated\*\*:\s*([^\n]+)', content)
+        last_updated = last_updated_match.group(1).strip() if last_updated_match else "Unknown"
+        
+        return {
+            'name': name,
+            'status': status,
+            'type': app_type,
+            'last_updated': last_updated,
+            'file': str(file_path),
+            'status_emoji': get_status_emoji(status)
+        }
+    except Exception as e:
+        print(f"Error processing {file_path}: {e}")
+        return None
+
+def generate_index():
+    """Generate the main INDEX.md file"""
+    applications = []
+    
+    # Scan active applications
+    active_dir = Path("applications/active")
+    if active_dir.exists():
+        for app_file in active_dir.glob("*.md"):
+            if app_file.name != "README.md" and app_file.name != "index.md":
+                app_info = get_application_info(app_file)
+                if app_info:
+                    applications.append(app_info)
+    
+    # Sort applications by name
+    applications.sort(key=lambda x: x['name'])
+    
+    # Calculate summary statistics
+    total_apps = len(applications)
+    active_count = sum(1 for a in applications if 'active' in a['status'].lower())
+    dev_count = sum(1 for a in applications if 'development' in a['status'].lower() or 'dev' in a['status'].lower())
+    
+    # Generate index content
+    content = f"""# Applications Index
+
+*Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+
+## Summary
+
+- **Total Applications**: {total_apps}
+- **Active**: {active_count}
+- **In Development**: {dev_count}
+
+## All Applications
+
+| Status | Name | Type | Last Updated | Link |
+|--------|------|------|--------------|------|
+"""
+    
+    if not applications:
+        content += "| *No applications yet* | | | | |\n"
+    else:
+        for app in applications:
+            # Create relative path for link
+            rel_path = os.path.join('applications/active', os.path.basename(app['file']))
+            content += f"| {app['status_emoji']} {app['status']} | {app['name']} | {app['type']} | {app['last_updated']} | [View]({rel_path}) |\n"
+    
+    content += "\n---\n*Last generated: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "*"
+    
+    # Write to file
+    with open("INDEX.md", "w", encoding='utf-8') as f:
+        f.write(content)
+    
+    print(f"✅ Generated INDEX.md with {len(applications)} applications")
+
+if __name__ == "__main__":
+    generate_index()
